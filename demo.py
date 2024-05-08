@@ -70,62 +70,188 @@
 
 import json
 import time
-from typing import Dict, Optional
 import requests
 import streamlit as st
 import os
+import traceback
+from typing import Dict, List, Optional, Tuple, Type, Union
+import boto3
 
 # read environment variable or secret from streamlit secrets
-bearer_token: str = st.secrets["BEARER_TOKEN"]  # os.getenv("BEARER_TOKEN") or st.secrets["BEARER_TOKEN"]  
+bearer_token: str = os.getenv("BEARER_TOKEN") or st.secrets["BEARER_TOKEN"]    # st.secrets["BEARER_TOKEN"]  
+secrets_manager = boto3.client("secretsmanager", region_name="us-west-2")
+skiff_task_agent_bearer_token = json.loads(secrets_manager.get_secret_value(SecretId="nora/agent-api-tokens")["SecretString"]).get("nora_agent")
 headers_ = { "Authorization": f"Bearer {bearer_token}", "content-type": "application/json" }
 
-def _run(input_claim: str, 
-         top_k: int=5, 
-         tool_url: str = "https://nora-claims.apps.allenai.org/use-tool", 
-         task_id: Optional[str] = None) -> Dict:
-        if tool_url is None:
-            raise ValueError("tool_url must be set")
 
-        res = {}
+class ClaimGraphOutputSchema:
+    # user_msg: str = Field(description="user facing message, when successful it contains a summarized report of the schema verification")
+    # task_id: Optional[str] = Field(description="job id to check status of, if there is already a job running", default=None)
+    # report: Optional[Dict] = Field(description="json object with summarized and detailed report of the schema verification including evidence and metadata containing provenance", default=None)
+    # An __init__ constructor with these fields user_msg, task_id, report
+    def __init__(
+        self,
+        user_msg: str,
+        estimated_wait: float = 0,
+        task_id: Optional[str] = None,
+        report: Optional[Dict] = None,
+    ):
+        self.user_msg = user_msg
+        self.estimated_wait = estimated_wait
+        self.task_id = task_id
+        self.report = report
 
-        if task_id:
-            # st.write(f"(if condition) task_id: {task_id}")
-            res = requests.post(
-                url=tool_url,
-                data=json.dumps({"task_id": task_id}),
-                headers=headers_,
-            ).json()
-            current_response = {
-                "paper_finder_agent_response": f"There are no results yet. please tell the user and wait for them to ask again before checking the status."
-            }
-            task_result = res.get("task_result")
-            if task_result:
-                current_response = {
-                    "paper_finder_agent_response": task_result.get(
-                        "response_text",
-                        f"There are no results yet. please tell the user and wait for them to ask again before checking the status.",
-                    ),
-                    "corpus_ids": task_result.get("corpus_ids", []),
-                }
-        else:
-            # st.write(f"(else condition) Task id is: {task_id}")
-            # "input_claim": "highly educated people are polarized", "top_k": 2
-            data_ = json.dumps({"input_claim": input_claim, "top_k": top_k})  
-            
-            res_str_json = requests.post(
-                tool_url,
-                data=data_,
-                headers=headers_,
+    def __eq__(self, other):
+        # task_id is unique.
+        return (
+            isinstance(other, ClaimGraphOutputSchema)
+            and self.user_msg == other.user_msg
+            and self.task_id == other.task_id
+        )
+
+    def __hash__(self):
+        return hash((self.user_msg, self.task_id))
+
+def _run(
+        input_claim: Optional[str] = None,
+        top_k: Optional[int] = 5,
+        task_id: Optional[str] = None,
+        ) -> ClaimGraphOutputSchema:
+
+        current_response: ClaimGraphOutputSchema = None
+        tool_url = "https://nora-claims.apps.allenai.org/use-tool"
+
+        try:
+            if tool_url is None:
+                raise ValueError(
+                    "Internal error. The service url (backend) for claim verification is not set (assign a tool_url in ClaimGraphTool)."
+                )
+
+            if not task_id and not input_claim:
+                raise ValueError(
+                    "No claim provided and no running task id provided for claim verification."
+                )
+
+            if (
+                task_id
+            ):  # a task_id is assigned/ provided, so we need to check the status of the task.
+                jj = {"task_id": task_id}
+                print(f"jj (if): {jj} and {headers_}")
+                # rsp = requests.post(
+                #     url=self.tool_url,
+                #     headers=self.header,
+                #     json={"task_id": task_id},
+                # )
+                rsp = requests.post(
+                    tool_url,
+                    headers=headers_,
+                    json=jj
+                )
+
+                # Check if the request was successful
+                if rsp.status_code != 200:
+                    current_response = ClaimGraphOutputSchema(
+                        user_msg=f"Request failed with status code: {rsp.status_code}\n{rsp.text}",
+                        task_id=task_id,
+                        estimated_wait=0 # already failed.
+                    )
+
+                else:
+                    rsp_json = rsp.json()
+                    task_result = rsp_json.get("task_result") or dict()
+                    summary = task_result.get("short_summary", "")
+                    wait_time = float(rsp_json["estimated_time"].replace(" minutes", "").replace(" minute", "").strip())
+                    if not summary:
+                        user_msg = f"There are no results yet. Please tell the user and wait for them to ask again before checking the status."
+                    else:
+                        wait_time = 0 # already completed.
+                        user_msg = summary
+
+                    current_response = ClaimGraphOutputSchema(
+                        user_msg=user_msg,
+                        report=task_result.get("report", {}).get("detailed_report", ""),
+                        task_id=task_id,
+                        estimated_wait=wait_time
+                    )
+            else:
+                jj = {"input_claim": input_claim, "top_k": top_k}
+                print(f"jj (else): {jj} and {headers_}")
+                rsp = requests.post(
+                    tool_url,
+                    headers=headers_,
+                    json=jj
+                )
+                if rsp.status_code != 200:
+                    current_response = ClaimGraphOutputSchema(
+                        user_msg=f"Request failed with status code: {rsp.status_code} and {rsp.text}",
+                        task_id=task_id,
+                        estimated_wait=0 # already failed.
+                    )
+
+                else:
+                    rsp_json = rsp.json()
+                    current_response = ClaimGraphOutputSchema(
+                        user_msg=f'The estimated time for this operation is: {rsp_json["estimated_time"]} and the task id assigned is {rsp_json["task_id"]}. Please tell the user and wait for them to ask again before checking the status.',
+                        task_id=rsp_json["task_id"],
+                        estimated_wait=float(rsp_json["estimated_time"].replace(" minutes", "").replace(" minute", "").strip())
+                    )
+
+        except Exception as e:
+            current_response = ClaimGraphOutputSchema(
+                user_msg=f"Internal failure.\nPython exception: {e}\nstacktrace: {traceback.format_exc()}",
             )
-            # st.write(f"res_str_json: {res_str_json.text} and as json: {res_str_json.json()}")
 
-            res = res_str_json.json()
-            current_response = {
-                "paper_finder_agent_response": f'The estimated time for this operation is: {res["estimated_time"]}, and the task_id is {res["task_id"]}. Please tell the user and wait for them to ask again before checking the status.'
-            }
+        return current_response
+
+
+
+# def _run(input_claim: str, 
+#          top_k: int=5, 
+#          tool_url: str = "https://nora-claims.apps.allenai.org/use-tool", 
+#          task_id: Optional[str] = None) -> Dict:
+#         if tool_url is None:
+#             raise ValueError("tool_url must be set")
+
+#         res = {}
+
+#         if task_id:
+#             # st.write(f"(if condition) task_id: {task_id}")
+#             res = requests.post(
+#                 url=tool_url,
+#                 data=json.dumps({"task_id": task_id}),
+#                 headers=headers_,
+#             ).json()
+#             current_response = {
+#                 "paper_finder_agent_response": f"There are no results yet. please tell the user and wait for them to ask again before checking the status."
+#             }
+#             task_result = res.get("task_result")
+#             if task_result:
+#                 current_response = {
+#                     "paper_finder_agent_response": task_result.get(
+#                         "response_text",
+#                         f"There are no results yet. please tell the user and wait for them to ask again before checking the status.",
+#                     ),
+#                     "corpus_ids": task_result.get("corpus_ids", []),
+#                 }
+#         else:
+#             # st.write(f"(else condition) Task id is: {task_id}")
+#             # "input_claim": "highly educated people are polarized", "top_k": 2
+#             data_ = json.dumps({"input_claim": input_claim, "top_k": top_k})  
+            
+#             res_str_json = requests.post(
+#                 tool_url,
+#                 data=data_,
+#                 headers=headers_,
+#             )
+#             # st.write(f"res_str_json: {res_str_json.text} and as json: {res_str_json.json()}")
+
+#             res = res_str_json.json()
+#             current_response = {
+#                 "paper_finder_agent_response": f'The estimated time for this operation is: {res["estimated_time"]}, and the task_id is {res["task_id"]}. Please tell the user and wait for them to ask again before checking the status.'
+#             }
         
-        # st.write(f"Current response: {current_response['paper_finder_agent_response']}")
-        return res, current_response
+#         # st.write(f"Current response: {current_response['paper_finder_agent_response']}")
+#         return res, current_response
 
 
 
@@ -164,7 +290,11 @@ def main():
     top_k = st.number_input("Number of papers to summarize over", value=5)
     answer = None
     wait_printed = False
-    task_id_ = ""
+    if "task_id" not in st.session_state:
+        st.session_state["task_id_"] = None
+    task_id_ = st.session_state["task_id_"]
+    st.write(f"task_id_: {task_id_}")
+
     time_remaining_in_minutes = 0
     wait_started_at = 0
     progress_bar = st.progress(0, text="Progress bar")
@@ -172,14 +302,18 @@ def main():
     if st.button("Submit"):
         while answer is None :
 
-            response, str_msg = _run(input_claim=claim, top_k=top_k, task_id=task_id_)
+            response = _run(input_claim=claim, top_k=top_k, task_id=task_id_)
+            if response.task_id: # if the response has a task_id then store it in the session state
+                st.session_state["task_id_"] = response.task_id
+                task_id_ = st.session_state["task_id_"]
 
-            # Check if the response is not ready yet then extract the time remaining and task_id from the response and show the message below
-            if "estimated_time" in response:
-                # Show the message below
-                task_id_ = response['task_id']
+            st.write(response.user_msg)
+
+            # Check if the response is not ready yet
+            if task_id_ and not response.report:
+                # initate the progress bar
                 if not wait_printed:
-                    time_remaining_in_minutes = float(response['estimated_time'].split(" ")[0])
+                    time_remaining_in_minutes = response.estimated_wait
                     # st.write(f"The estimated time for this operation is: {time_remaining_in_minutes: 0.2} minutes.")
                     # st.write(f"The task id assigned is {response['task_id']}")
                     wait_printed = True # Set this flag to True so that the message is not printed again
@@ -187,7 +321,7 @@ def main():
                     # Show the progress bar based on the estimated time
                     progress_bar.progress(0)
                 else:
-                    # estimated time remaining
+                    # show the estimated time remaining on the progress bar
                     percentage_done = int((time.time() - wait_started_at) / (time_remaining_in_minutes * 60) * 100)
                     percentage_done = 95 if percentage_done >= 95 else percentage_done
                     progress_bar.progress(percentage_done)
@@ -196,9 +330,8 @@ def main():
                 # If the response is ready then show the response
                 # Check if the response has the key "paper_finder_agent_response" and if it has then show the response
                 progress_bar.progress(100)
-                answer = response["task_result"]
-                short_summary = answer["short_summary"]
-                report = answer["report"]
+                short_summary = response.user_msg
+                report = response.report
 
                 # Make a collapsible section in streamlit to show complete response
                 # st.write("Response")
@@ -208,7 +341,7 @@ def main():
                 # Expand the collapsible section to show the complete response
                 st.write("\n\n")
                 with st.expander("Detailed Report"):
-                    st.json(response)
+                    st.json(report)
                 
                 
 
