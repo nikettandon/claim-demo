@@ -283,7 +283,7 @@ def main():
 
     # Select a claim input from the dropdown or write one
     claim = st.selectbox("Select a claim or type", sample_cs_claims)
-    if claim == "type your own claim here...":
+    if claim == "type your own claim below...":
         claim = st.text_area("Type your claim here")
     top_k = st.number_input("Number of papers to summarize over", value=5)
     answer = None
