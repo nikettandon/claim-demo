@@ -257,7 +257,7 @@ def _run(
 def main():
     st.title("CS Claim verifier")
     sample_cs_claims = [
-        "type your own claim here...",
+        "type your own claim below...",
         "work autonomy can increase motivation",
         "weight decay helps generalization",
         "word embeddings preserve gender biases",
@@ -341,6 +341,7 @@ def main():
                 st.write("\n\n")
                 with st.expander("Detailed Report"):
                     st.json(report)
+        st.session_state["task_id_"] = None # reset the task_id_ to None after the response is received.
                 
                 
 
