@@ -288,6 +288,8 @@ def main():
     top_k = st.number_input("Number of papers to summarize over", value=5)
     answer = None
     wait_printed = False
+    if "in_memory_cache" not in st.session_state:
+        st.session_state["in_memory_cache"] = {}
     if "task_id_" not in st.session_state:
         st.session_state["task_id_"] = None
     task_id_ = st.session_state["task_id_"]
@@ -341,6 +343,9 @@ def main():
                 st.write("\n\n")
                 with st.expander("Detailed Report"):
                     st.json(report)
+                    st.session_state["in_memory_cache"][f"{claim}\t{top_k}"] = report # store the response in the cache.
+                    print(f"\n\n\nFinishing... [cacheable][claim_input: {claim}, top_k: {top_k}]: \treport: {report}\n\n\n")
+
         st.session_state["task_id_"] = None # reset the task_id_ to None after the response is received.
                 
                 
