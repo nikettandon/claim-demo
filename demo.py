@@ -300,6 +300,10 @@ def main():
     progress_bar = st.progress(0, text="Progress bar")
 
     if st.button("Submit"):
+        if f"{claim}\t{top_k}" in st.session_state["in_memory_cache"]:
+            st.write("\n\nFetching from cache...")
+            st.write(st.session_state["in_memory_cache"][f"{claim}\t{top_k}"])
+            return
         while answer is None :
             response = _run(input_claim=claim, top_k=top_k, task_id=st.session_state["task_id_"])
             if not st.session_state["task_id_"] and response.task_id: # if the response has a task_id then store it in the session state if not already stored.
