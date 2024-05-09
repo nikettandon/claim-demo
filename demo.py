@@ -136,7 +136,7 @@ def _run(
                 task_id
             ):  # a task_id is assigned/ provided, so we need to check the status of the task.
                 jj = {"task_id": task_id}
-                print(f"jj (if): {jj} and {headers_}")
+                # print(f"check task status: {jj}")
                 # rsp = requests.post(
                 #     url=self.tool_url,
                 #     headers=self.header,
@@ -160,8 +160,8 @@ def _run(
                     rsp_json = rsp.json()
                     task_result = rsp_json.get("task_result") or dict()
                     summary = task_result.get("short_summary", "")
-                    wait_time = float(rsp_json["estimated_time"].replace(" minutes", "").replace(" minute", "").strip())
                     if not summary:
+                        wait_time = float(rsp_json.get("estimated_time", "0.0").replace(" minutes", "").replace(" minute", "").strip())
                         user_msg = f"There are no results yet. Please tell the user and wait for them to ask again before checking the status."
                     else:
                         wait_time = 0 # already completed.
@@ -169,13 +169,14 @@ def _run(
 
                     current_response = ClaimGraphOutputSchema(
                         user_msg=user_msg,
-                        report=task_result.get("report", {}).get("detailed_report", ""),
+                        report=task_result.get("report", {}).get("detailed report", ""),
                         task_id=task_id,
-                        estimated_wait=wait_time
+                        # When the task is complete, there is no estimated wait time available in the response json. 
+                        estimated_wait= wait_time
                     )
-            else:
+            else: # assign a task_id and start the async task.
                 jj = {"input_claim": input_claim, "top_k": top_k}
-                print(f"jj (else): {jj} and {headers_}")
+                print(f"started the task and assigning a task id for: {jj}")
                 rsp = requests.post(
                     tool_url,
                     headers=headers_,
@@ -191,7 +192,7 @@ def _run(
                 else:
                     rsp_json = rsp.json()
                     current_response = ClaimGraphOutputSchema(
-                        user_msg=f'The estimated time for this operation is: {rsp_json["estimated_time"]} and the task id assigned is {rsp_json["task_id"]}. Please tell the user and wait for them to ask again before checking the status.',
+                        user_msg=f'The estimated time for this operation is: {rsp_json["estimated_time"]} minutes and the task id assigned is {rsp_json["task_id"]}. Please tell the user and wait for them to ask again before checking the status.',
                         task_id=rsp_json["task_id"],
                         estimated_wait=float(rsp_json["estimated_time"].replace(" minutes", "").replace(" minute", "").strip())
                     )
@@ -290,10 +291,10 @@ def main():
     top_k = st.number_input("Number of papers to summarize over", value=5)
     answer = None
     wait_printed = False
-    if "task_id" not in st.session_state:
+    if "task_id_" not in st.session_state:
         st.session_state["task_id_"] = None
     task_id_ = st.session_state["task_id_"]
-    st.write(f"task_id_: {task_id_}")
+    st.write(f"task_id_: {task_id_ or 'Not assigned yet ...'}")
 
     time_remaining_in_minutes = 0
     wait_started_at = 0
@@ -301,21 +302,21 @@ def main():
 
     if st.button("Submit"):
         while answer is None :
-
-            response = _run(input_claim=claim, top_k=top_k, task_id=task_id_)
-            if response.task_id: # if the response has a task_id then store it in the session state
+            response = _run(input_claim=claim, top_k=top_k, task_id=st.session_state["task_id_"])
+            if not st.session_state["task_id_"] and response.task_id: # if the response has a task_id then store it in the session state if not already stored.
                 st.session_state["task_id_"] = response.task_id
-                task_id_ = st.session_state["task_id_"]
-
-            st.write(response.user_msg)
-
+                # Wait for a bit.
+                st.write(f"Let us wait for the response for {response.estimated_wait*60/2.0:0.2} seconds...")
+                time.sleep(response.estimated_wait*60/2.0)  # est wait time is in minutes so convert to seconds. 
+                
             # Check if the response is not ready yet
-            if task_id_ and not response.report:
+            if st.session_state["task_id_"] and not response.report:
                 # initate the progress bar
                 if not wait_printed:
                     time_remaining_in_minutes = response.estimated_wait
-                    # st.write(f"The estimated time for this operation is: {time_remaining_in_minutes: 0.2} minutes.")
-                    # st.write(f"The task id assigned is {response['task_id']}")
+                    # st.write(f"The estimated time for this operation is: {time_remaining_in_minutes:0.2} minutes.")
+                    # st.write(f"The task id assigned is {response.user_msg}")
+                    st.write(response.user_msg)
                     wait_printed = True # Set this flag to True so that the message is not printed again
                     wait_started_at = time.time()
                     # Show the progress bar based on the estimated time
@@ -326,12 +327,13 @@ def main():
                     percentage_done = 95 if percentage_done >= 95 else percentage_done
                     progress_bar.progress(percentage_done)
 
-            else:
+            elif st.session_state["task_id_"] and response.report:
                 # If the response is ready then show the response
                 # Check if the response has the key "paper_finder_agent_response" and if it has then show the response
                 progress_bar.progress(100)
                 short_summary = response.user_msg
                 report = response.report
+                answer = response.user_msg
 
                 # Make a collapsible section in streamlit to show complete response
                 # st.write("Response")
