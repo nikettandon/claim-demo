@@ -75,12 +75,9 @@ import streamlit as st
 import os
 import traceback
 from typing import Dict, List, Optional, Tuple, Type, Union
-import boto3
 
 # read environment variable or secret from streamlit secrets
 bearer_token: str = os.getenv("BEARER_TOKEN") or st.secrets["BEARER_TOKEN"]    # st.secrets["BEARER_TOKEN"]  
-secrets_manager = boto3.client("secretsmanager", region_name="us-west-2")
-skiff_task_agent_bearer_token = json.loads(secrets_manager.get_secret_value(SecretId="nora/agent-api-tokens")["SecretString"]).get("nora_agent")
 headers_ = { "Authorization": f"Bearer {bearer_token}", "content-type": "application/json" }
 
 
@@ -306,7 +303,7 @@ def main():
             if not st.session_state["task_id_"] and response.task_id: # if the response has a task_id then store it in the session state if not already stored.
                 st.session_state["task_id_"] = response.task_id
                 # Wait for a bit.
-                st.write(f"Let us wait for the response for {response.estimated_wait*60/2.0:0.2} seconds...")
+                st.write(f"Let us wait for the response for {response.estimated_wait*60/2.0} seconds...")
                 time.sleep(response.estimated_wait*60/2.0)  # est wait time is in minutes so convert to seconds. 
                 
             # Check if the response is not ready yet
