@@ -74,7 +74,7 @@ import requests
 import streamlit as st
 import os
 import traceback
-from typing import Dict, List, Optional, Tuple, Type, Union
+from typing import Dict, Optional
 
 # read environment variable or secret from streamlit secrets
 bearer_token: str = os.getenv("BEARER_TOKEN") or st.secrets["BEARER_TOKEN"]    # st.secrets["BEARER_TOKEN"]  
@@ -343,12 +343,17 @@ def main():
                 # write summary in bold text
                 st.markdown(f"**Short Summary:** {short_summary}")
 
+                complete_report = {} 
+                complete_report["claim"] = claim
+                complete_report["short summary"] = short_summary
+                complete_report["detailed report"] = report
+
                 # Expand the collapsible section to show the complete response
                 st.write("\n\n")
                 with st.expander("Detailed Report"):
-                    st.json(report)
+                    st.json(complete_report)
                     st.session_state["in_memory_cache"][f"{claim}\t{top_k}"] = report # store the response in the cache.
-                    print(f"\n\n\nFinishing... [cacheable][claim_input: {claim}, top_k: {top_k}]: \treport: {report}\n\n\n")
+                    print(f"\n\n\nFinishing... [cacheable][claim_input: {claim}, top_k: {top_k}]: \treport: {complete_report}\n\n\n")
 
         st.session_state["task_id_"] = None # reset the task_id_ to None after the response is received.
                 
