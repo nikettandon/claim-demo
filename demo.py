@@ -6,7 +6,7 @@
 # { 
 #   "claim": "..."  , 
 #   " short summary": "..."  ,
-#   " detailed report": {
+#   " detailed_report": {
 #                  "strong supporting evidence": [ ... evidence, context, metadata ... ]
 #                  "strong refuting evidence":   [ ... evidence, context, metadata ... ]
 #                  "partial supporting evidence":[ ... evidence, context, metadata ... ]
@@ -19,7 +19,7 @@
 # "report":{
 # "claim":"word embeddings preserve gender biases"
 # "short summary":"The claim is strongly supported by the evidence. Word embeddings, a popular machine-learnt semantic space, have been shown to retain gender bias present in corpora used to train them. This results in gender-stereotypical vector analogies and such bias has been shown to materialise in a variety of downstream tasks."
-# "detailed report":{
+# "detailed_report":{
 # "strong evidence in support of the claim":[
 # 0:{
 # "evidence":"However, contextualized word embeddings preserve and even amplify gender bias when taking into account other aspects."
@@ -166,7 +166,7 @@ def _run(
 
                     current_response = ClaimGraphOutputSchema(
                         user_msg=user_msg,
-                        report=task_result.get("report", {}).get("detailed report", ""),
+                        report=task_result.get("report", {}).get("detailed_report", ""),
                         task_id=task_id,
                         # When the task is complete, there is no estimated wait time available in the response json. 
                         estimated_wait= wait_time
@@ -346,7 +346,7 @@ def main():
                 complete_report = {} 
                 complete_report["claim"] = claim
                 complete_report["short summary"] = short_summary
-                complete_report["detailed report"] = report
+                complete_report["detailed_report"] = report
 
                 # Expand the collapsible section to show the complete response
                 st.write("\n\n")
